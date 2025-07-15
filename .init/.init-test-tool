@@ -1,0 +1,4 @@
+{
+    "command": "pytest",
+    "working_directory": "/home/kavia/workspace/code-generation/stock-portfolio-manager-c343ff51/backend"
+}
