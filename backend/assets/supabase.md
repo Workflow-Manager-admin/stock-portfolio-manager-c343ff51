@@ -20,13 +20,25 @@ SUPABASE_KEY=<your-service-api-key>
 
 # Zerodha Kite API Integration
 
-Production order placement requires:
+Production order placement and portfolio actions require integration with Zerodha Kite's REST API.
 
-- User-specific access and refresh tokens for Kite REST API (must be securely stored + managed).
-- Global credentials in `.env`:
-  - `ZERODHA_KITE_API_KEY`
-  - `ZERODHA_KITE_API_SECRET`
+- User-specific access and refresh tokens for Kite REST API (must be securely stored + managed, e.g., in your DB).
+- The following global credentials must be set in `.env` for backend startup:
 
-Demo code provides endpoint scaffolding and simulated responses. Production integration would use (1) user OAuth flow, (2) kiteconnect python client, etc.
+```
+KITE_API_KEY=d9hqdwpwqs1fpn9v
+KITE_API_SECRET=zutgh8i03uanjfa16p1ef5hd9a8ne69g
+```
+Alternatively, the legacy environment keys are also read if present:
+```
+ZERODHA_KITE_API_KEY=d9hqdwpwqs1fpn9v
+ZERODHA_KITE_API_SECRET=zutgh8i03uanjfa16p1ef5hd9a8ne69g
+```
+**IMPORTANT:** Never commit secrets to public repos. Store secret values in environment variables only.
 
----
+- Users must OAuth authenticate via `/kite/oauth-url` → redirect to browser, sign in and approve
+- The backend exchanges the `request_token` for an `access_token` using `/kite/generate-token`
+- Place orders using `/order` with a valid user's access_token
+- For API details, see `src/api/kite_service.py`, and FastAPI docs
+
+Demo code scaffolds endpoints for interactive authentication and order placement. Production integration should also persist/refresh tokens securely and manage user identities.

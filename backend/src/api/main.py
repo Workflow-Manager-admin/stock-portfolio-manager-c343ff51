@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -7,14 +7,23 @@ from typing import List, Optional, Dict
 from dotenv import load_dotenv
 import httpx
 
+# Import Kite Connect service wrapper
+from .kite_service import (
+    get_request_token_url,
+    generate_access_token,
+    place_order_kite,
+    get_profile,
+    KiteAuthError
+)
+
 # Load .env variables
 load_dotenv()
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
-ZERODHA_KITE_API_KEY = os.environ.get("ZERODHA_KITE_API_KEY")  # These should be set in .env if actually integrating.
-ZERODHA_KITE_API_SECRET = os.environ.get("ZERODHA_KITE_API_SECRET")
+KITE_API_KEY = os.environ.get("KITE_API_KEY") or os.environ.get("ZERODHA_KITE_API_KEY")
+KITE_API_SECRET = os.environ.get("KITE_API_SECRET") or os.environ.get("ZERODHA_KITE_API_SECRET")
 
 app = FastAPI(
     title="Stock Portfolio Manager API",
@@ -254,10 +263,37 @@ async def get_recommendations(user: dict = Depends(get_current_user)):
         Recommendation(symbol="NIFTY21SEP30000CE", reason="Bullish trend, short-term momentum", type="OPTION"),
     ]
 
+# PUBLIC_INTERFACE
+@app.get("/kite/oauth-url", tags=["order"], summary="Get Zerodha Kite OAuth URL")
+async def kite_oauth_url():
+    """
+    Get the Zerodha Kite OAuth authentication/authorization URL.
+    Redirect users to this URL to login and approve access.
+    """
+    url = await get_request_token_url()
+    return {"kite_auth_url": url}
+
+# PUBLIC_INTERFACE
+@app.post("/kite/generate-token", tags=["order"], summary="Generate Zerodha Kite Access Token")
+async def kite_generate_token(request_token: str = Query(..., description="Request token from Zerodha OAuth redirect")):
+    """
+    Obtain Zerodha Kite access_token (user must authenticate via OAuth first).
+    Input: `request_token` (from OAuth callback)
+    Returns: dict containing access_token, public_token, etc.
+    """
+    try:
+        token_data = await generate_access_token(request_token)
+        return token_data
+    except KiteAuthError as ex:
+        raise HTTPException(status_code=400, detail=str(ex))
 
 # PUBLIC_INTERFACE
 @app.post("/order", summary="Place order via Zerodha Kite", response_model=OrderResponse, tags=["order"])
-async def place_order(order: OrderRequest, user: dict = Depends(get_current_user)):
+async def place_order(
+    order: OrderRequest,
+    access_token: str = Query(..., description="User's Zerodha Kite access_token (from /kite/generate-token)"),
+    user: dict = Depends(get_current_user)
+):
     """
     Place an order via Zerodha Kite API.
 
@@ -266,15 +302,35 @@ async def place_order(order: OrderRequest, user: dict = Depends(get_current_user
     - **transaction_type**: BUY or SELL
     - **order_type**: MARKET, LIMIT, etc.
     - **price**: Limit price, if order_type is LIMIT
+
+    Requires user's Zerodha Kite `access_token`.
     """
-    # This is a stub; requires real integration with Kite's REST API, with user-specific tokens.
-    # You should fetch user Zerodha access token securely from your DB.
     try:
-        # Simulated success for demo
-        return OrderResponse(status="success", order_id="mock123", message="Order placed (simulation).")
+        result = await place_order_kite(access_token, order.model_dump())
+        return OrderResponse(
+            status="success",
+            order_id=result.get("order_id", ""),
+            message="Order placed successfully via Zerodha Kite."
+        )
+    except KiteAuthError as ex:
+        return OrderResponse(status="failed", order_id=None, message=str(ex))
     except Exception as ex:
         return OrderResponse(status="failed", order_id=None, message=str(ex))
 
+# PUBLIC_INTERFACE
+@app.get("/kite/profile", tags=["order"], summary="Get Kite Connect User Profile")
+async def kite_profile(
+    access_token: str = Query(..., description="User's Zerodha Kite access_token (from /kite/generate-token)"),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Fetch the authenticated user's Zerodha profile using the access token.
+    """
+    try:
+        profile = await get_profile(access_token)
+        return profile
+    except KiteAuthError as ex:
+        raise HTTPException(status_code=400, detail=str(ex))
 
 # PUBLIC_INTERFACE
 @app.get("/analytics", summary="View portfolio analytics", response_model=AnalyticsResponse, tags=["analytics"])
